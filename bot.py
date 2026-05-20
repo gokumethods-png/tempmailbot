@@ -5,7 +5,13 @@ import random
 import string
 import requests
 import os
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+
+from telegram import (
+    Update,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup
+)
+
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -60,13 +66,17 @@ def random_string(length=10):
 def get_domain():
     response = requests.get(f"{BASE_URL}/domains")
     domains = response.json()["hydra:member"]
+
     return domains[0]["domain"]
 
 def create_account():
+
     domain = get_domain()
 
     username = random_string()
+
     email = f"{username}@{domain}"
+
     password = random_string(12)
 
     payload = {
@@ -93,6 +103,7 @@ def create_account():
     }
 
 def get_messages(token):
+
     headers = {
         "Authorization": f"Bearer {token}"
     }
@@ -105,6 +116,7 @@ def get_messages(token):
     return response.json()["hydra:member"]
 
 def read_message(token, msg_id):
+
     headers = {
         "Authorization": f"Bearer {token}"
     }
@@ -120,9 +132,20 @@ def read_message(token, msg_id):
 # START COMMAND
 # =========================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
     keyboard = [
-        [InlineKeyboardButton("📧 Generate Temp Mail", callback_data="gen")],
-        [InlineKeyboardButton("📥 Check Inbox", callback_data="inbox")],
+        [
+            InlineKeyboardButton(
+                "📧 Generate Temp Mail",
+                callback_data="gen"
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                "📥 Check Inbox",
+                callback_data="inbox"
+            )
+        ],
     ]
 
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -137,15 +160,20 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # BUTTON HANDLER
 # =========================
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
     query = update.callback_query
 
     await query.answer()
 
     user_id = query.from_user.id
 
+    # =========================
+    # GENERATE MAIL
+    # =========================
     if query.data == "gen":
 
         try:
+
             account = create_account()
 
             user_mails[user_id] = account
@@ -153,7 +181,12 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             email = account["email"]
 
             keyboard = [
-                [InlineKeyboardButton("📥 Check Inbox", callback_data="inbox")]
+                [
+                    InlineKeyboardButton(
+                        "📥 Check Inbox",
+                        callback_data="inbox"
+                    )
+                ]
             ]
 
             reply_markup = InlineKeyboardMarkup(keyboard)
@@ -166,21 +199,28 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
 
         except Exception as e:
+
             logger.error(e)
 
             await query.message.reply_text(
                 "❌ Failed to generate temp mail"
             )
 
+    # =========================
+    # CHECK INBOX
+    # =========================
     elif query.data == "inbox":
 
         if user_id not in user_mails:
+
             await query.message.reply_text(
                 "❌ Generate a temp mail first"
             )
+
             return
 
         try:
+
             account = user_mails[user_id]
 
             token = account["token"]
@@ -188,9 +228,11 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             messages = get_messages(token)
 
             if not messages:
+
                 await query.message.reply_text(
                     "📭 Inbox is empty"
                 )
+
                 return
 
             for msg in messages:
@@ -230,6 +272,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await query.message.reply_text(text)
 
         except Exception as e:
+
             logger.error(e)
 
             await query.message.reply_text(
@@ -239,15 +282,34 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # =========================
 # MAIN
 # =========================
-if __name__ == "__main__":
+async def post_init(application):
+    print("Bot started successfully!")
+
+def main():
 
     keep_alive()
 
-    application = Application.builder().token(BOT_TOKEN).build()
+    application = (
+        Application.builder()
+        .token(BOT_TOKEN)
+        .post_init(post_init)
+        .build()
+    )
 
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(CallbackQueryHandler(button_handler))
+    application.add_handler(
+        CommandHandler("start", start)
+    )
 
-    print("Bot started successfully!")
+    application.add_handler(
+        CallbackQueryHandler(button_handler)
+    )
 
-    application.run_polling(drop_pending_updates=True)
+    print("Starting polling...")
+
+    application.run_polling(
+        drop_pending_updates=True,
+        allowed_updates=Update.ALL_TYPES
+    )
+
+if __name__ == "__main__":
+    main()
