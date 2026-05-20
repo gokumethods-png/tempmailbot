@@ -1,10 +1,6 @@
 services:
-  - type: worker
-    name: tempmail-bot
+  - type: web
+    name: tempmailbot
     env: python
-    plan: free
     buildCommand: pip install -r requirements.txt
     startCommand: python bot.py
-    envVars:
-      - key: PYTHON_VERSION
-        value: 3.11.9
