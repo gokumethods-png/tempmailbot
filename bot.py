@@ -14,7 +14,7 @@ from telegram.ext import (
 )
 
 # =========================
-# WEB SERVER FOR RENDER
+# WEB SERVER
 # =========================
 app_web = Flask('')
 
@@ -66,9 +66,7 @@ def create_account():
     domain = get_domain()
 
     username = random_string()
-
     email = f"{username}@{domain}"
-
     password = random_string(12)
 
     payload = {
@@ -119,7 +117,7 @@ def read_message(token, msg_id):
     return response.json()
 
 # =========================
-# START
+# START COMMAND
 # =========================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
@@ -130,13 +128,13 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     await update.message.reply_text(
-        "🔥 Welcome To TempMail Bot\n\n"
+        "🔥 Welcome To Goku TempMail Bot\n\n"
         "Generate unlimited temporary emails instantly.",
         reply_markup=reply_markup,
     )
 
 # =========================
-# BUTTONS
+# BUTTON HANDLER
 # =========================
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -241,21 +239,15 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # =========================
 # MAIN
 # =========================
-def main():
+if __name__ == "__main__":
 
     keep_alive()
 
-    app = Application.builder().token(BOT_TOKEN).build()
+    application = Application.builder().token(BOT_TOKEN).build()
 
-    app.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CallbackQueryHandler(button_handler))
 
-    app.add_handler(
-        CallbackQueryHandler(button_handler)
-    )
+    print("Bot started successfully!")
 
-    print("Bot is running...")
-
-    app.run_polling()
-
-if __name__ == "__main__":
-    main()
+    application.run_polling(drop_pending_updates=True)
