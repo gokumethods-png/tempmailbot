@@ -5,13 +5,9 @@ import random
 import string
 import requests
 import os
+import asyncio
 
-from telegram import (
-    Update,
-    InlineKeyboardButton,
-    InlineKeyboardMarkup
-)
-
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -19,64 +15,38 @@ from telegram.ext import (
     ContextTypes,
 )
 
-# =========================
-# WEB SERVER
-# =========================
-app_web = Flask('')
+app_web = Flask(__name__)
 
-@app_web.route('/')
+@app_web.route("/")
 def home():
     return "Bot is running!"
 
 def run_web():
     port = int(os.environ.get("PORT", 10000))
-    app_web.run(host='0.0.0.0', port=port)
+    app_web.run(host="0.0.0.0", port=port)
 
 def keep_alive():
-    t = Thread(target=run_web)
-    t.start()
+    Thread(target=run_web).start()
 
-# =========================
-# CONFIG
-# =========================
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-
 BASE_URL = "https://api.mail.tm"
 
-logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    level=logging.INFO,
-)
-
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 user_mails = {}
 
-# =========================
-# MAIL FUNCTIONS
-# =========================
 def random_string(length=10):
-    return "".join(
-        random.choices(
-            string.ascii_lowercase + string.digits,
-            k=length
-        )
-    )
+    return "".join(random.choices(string.ascii_lowercase + string.digits, k=length))
 
 def get_domain():
     response = requests.get(f"{BASE_URL}/domains")
-    domains = response.json()["hydra:member"]
-
-    return domains[0]["domain"]
+    return response.json()["hydra:member"][0]["domain"]
 
 def create_account():
-
     domain = get_domain()
-
     username = random_string()
-
     email = f"{username}@{domain}"
-
     password = random_string(12)
 
     payload = {
@@ -84,16 +54,9 @@ def create_account():
         "password": password
     }
 
-    requests.post(
-        f"{BASE_URL}/accounts",
-        json=payload
-    )
+    requests.post(f"{BASE_URL}/accounts", json=payload)
 
-    token_res = requests.post(
-        f"{BASE_URL}/token",
-        json=payload
-    )
-
+    token_res = requests.post(f"{BASE_URL}/token", json=payload)
     token = token_res.json()["token"]
 
     return {
@@ -103,213 +66,86 @@ def create_account():
     }
 
 def get_messages(token):
-
-    headers = {
-        "Authorization": f"Bearer {token}"
-    }
-
-    response = requests.get(
-        f"{BASE_URL}/messages",
-        headers=headers
-    )
-
+    headers = {"Authorization": f"Bearer {token}"}
+    response = requests.get(f"{BASE_URL}/messages", headers=headers)
     return response.json()["hydra:member"]
 
 def read_message(token, msg_id):
-
-    headers = {
-        "Authorization": f"Bearer {token}"
-    }
-
-    response = requests.get(
-        f"{BASE_URL}/messages/{msg_id}",
-        headers=headers
-    )
-
+    headers = {"Authorization": f"Bearer {token}"}
+    response = requests.get(f"{BASE_URL}/messages/{msg_id}", headers=headers)
     return response.json()
 
-# =========================
-# START COMMAND
-# =========================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
     keyboard = [
-        [
-            InlineKeyboardButton(
-                "📧 Generate Temp Mail",
-                callback_data="gen"
-            )
-        ],
-        [
-            InlineKeyboardButton(
-                "📥 Check Inbox",
-                callback_data="inbox"
-            )
-        ],
+        [InlineKeyboardButton("📧 Generate Temp Mail", callback_data="gen")],
+        [InlineKeyboardButton("📥 Check Inbox", callback_data="inbox")]
     ]
 
-    reply_markup = InlineKeyboardMarkup(keyboard)
-
     await update.message.reply_text(
-        "🔥 Welcome To Goku TempMail Bot\n\n"
-        "Generate unlimited temporary emails instantly.",
-        reply_markup=reply_markup,
+        "🔥 Welcome To Goku TempMail Bot",
+        reply_markup=InlineKeyboardMarkup(keyboard)
     )
 
-# =========================
-# BUTTON HANDLER
-# =========================
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
     query = update.callback_query
-
     await query.answer()
 
     user_id = query.from_user.id
 
-    # =========================
-    # GENERATE MAIL
-    # =========================
     if query.data == "gen":
+        account = create_account()
+        user_mails[user_id] = account
 
-        try:
+        await query.message.reply_text(
+            f"✅ Temp Mail Generated\n\n📧 `{account['email']}`",
+            parse_mode="Markdown"
+        )
 
-            account = create_account()
-
-            user_mails[user_id] = account
-
-            email = account["email"]
-
-            keyboard = [
-                [
-                    InlineKeyboardButton(
-                        "📥 Check Inbox",
-                        callback_data="inbox"
-                    )
-                ]
-            ]
-
-            reply_markup = InlineKeyboardMarkup(keyboard)
-
-            await query.message.reply_text(
-                f"✅ Temp Mail Generated\n\n"
-                f"📧 `{email}`",
-                parse_mode="Markdown",
-                reply_markup=reply_markup,
-            )
-
-        except Exception as e:
-
-            logger.error(e)
-
-            await query.message.reply_text(
-                "❌ Failed to generate temp mail"
-            )
-
-    # =========================
-    # CHECK INBOX
-    # =========================
     elif query.data == "inbox":
 
         if user_id not in user_mails:
-
-            await query.message.reply_text(
-                "❌ Generate a temp mail first"
-            )
-
+            await query.message.reply_text("❌ Generate a temp mail first")
             return
 
-        try:
+        account = user_mails[user_id]
+        token = account["token"]
 
-            account = user_mails[user_id]
+        messages = get_messages(token)
 
-            token = account["token"]
+        if not messages:
+            await query.message.reply_text("📭 Inbox is empty")
+            return
 
-            messages = get_messages(token)
+        for msg in messages:
+            full_msg = read_message(token, msg["id"])
 
-            if not messages:
-
-                await query.message.reply_text(
-                    "📭 Inbox is empty"
-                )
-
-                return
-
-            for msg in messages:
-
-                msg_id = msg["id"]
-
-                sender = msg.get(
-                    "from",
-                    {}
-                ).get(
-                    "address",
-                    "Unknown"
-                )
-
-                subject = msg.get(
-                    "subject",
-                    "No Subject"
-                )
-
-                full_msg = read_message(
-                    token,
-                    msg_id
-                )
-
-                body = full_msg.get(
-                    "text",
-                    "No content"
-                )
-
-                text = (
-                    f"📨 New Email\n\n"
-                    f"👤 From: {sender}\n"
-                    f"📝 Subject: {subject}\n\n"
-                    f"📄 Message:\n{body[:3500]}"
-                )
-
-                await query.message.reply_text(text)
-
-        except Exception as e:
-
-            logger.error(e)
+            sender = msg.get("from", {}).get("address", "Unknown")
+            subject = msg.get("subject", "No Subject")
+            body = full_msg.get("text", "No content")
 
             await query.message.reply_text(
-                "❌ Failed to fetch inbox"
+                f"📨 New Email\n\n"
+                f"👤 From: {sender}\n"
+                f"📝 Subject: {subject}\n\n"
+                f"{body[:3500]}"
             )
 
-# =========================
-# MAIN
-# =========================
-async def post_init(application):
-    print("Bot started successfully!")
-
-def main():
-
+async def main():
     keep_alive()
 
-    application = (
-        Application.builder()
-        .token(BOT_TOKEN)
-        .post_init(post_init)
-        .build()
-    )
+    app = Application.builder().token(BOT_TOKEN).build()
 
-    application.add_handler(
-        CommandHandler("start", start)
-    )
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CallbackQueryHandler(button_handler))
 
-    application.add_handler(
-        CallbackQueryHandler(button_handler)
-    )
+    print("Bot started successfully!")
 
-    print("Starting polling...")
+    await app.initialize()
+    await app.start()
+    await app.updater.start_polling()
 
-    application.run_polling(
-        drop_pending_updates=True,
-        allowed_updates=Update.ALL_TYPES
-    )
+    while True:
+        await asyncio.sleep(3600)
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
