@@ -1,9 +1,10 @@
+from flask import Flask
+from threading import Thread
 import logging
 import random
 import string
 import requests
 import os
-import asyncio
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application,
@@ -12,6 +13,26 @@ from telegram.ext import (
     ContextTypes,
 )
 
+# =========================
+# WEB SERVER FOR RENDER
+# =========================
+app_web = Flask('')
+
+@app_web.route('/')
+def home():
+    return "Bot is running!"
+
+def run_web():
+    port = int(os.environ.get("PORT", 10000))
+    app_web.run(host='0.0.0.0', port=port)
+
+def keep_alive():
+    t = Thread(target=run_web)
+    t.start()
+
+# =========================
+# CONFIG
+# =========================
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 
 BASE_URL = "https://api.mail.tm"
@@ -25,6 +46,9 @@ logger = logging.getLogger(__name__)
 
 user_mails = {}
 
+# =========================
+# MAIL FUNCTIONS
+# =========================
 def random_string(length=10):
     return "".join(
         random.choices(
@@ -42,7 +66,9 @@ def create_account():
     domain = get_domain()
 
     username = random_string()
+
     email = f"{username}@{domain}"
+
     password = random_string(12)
 
     payload = {
@@ -92,6 +118,9 @@ def read_message(token, msg_id):
 
     return response.json()
 
+# =========================
+# START
+# =========================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [InlineKeyboardButton("📧 Generate Temp Mail", callback_data="gen")],
@@ -106,15 +135,21 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=reply_markup,
     )
 
+# =========================
+# BUTTONS
+# =========================
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
+
     await query.answer()
 
     user_id = query.from_user.id
 
     if query.data == "gen":
+
         try:
             account = create_account()
+
             user_mails[user_id] = account
 
             email = account["email"]
@@ -126,13 +161,15 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup = InlineKeyboardMarkup(keyboard)
 
             await query.message.reply_text(
-                f"✅ Temp Mail Generated\n\n📧 `{email}`",
+                f"✅ Temp Mail Generated\n\n"
+                f"📧 `{email}`",
                 parse_mode="Markdown",
                 reply_markup=reply_markup,
             )
 
         except Exception as e:
             logger.error(e)
+
             await query.message.reply_text(
                 "❌ Failed to generate temp mail"
             )
@@ -147,6 +184,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         try:
             account = user_mails[user_id]
+
             token = account["token"]
 
             messages = get_messages(token)
@@ -158,14 +196,21 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 return
 
             for msg in messages:
+
                 msg_id = msg["id"]
 
-                sender = msg.get("from", {}).get(
+                sender = msg.get(
+                    "from",
+                    {}
+                ).get(
                     "address",
                     "Unknown"
                 )
 
-                subject = msg.get("subject", "No Subject")
+                subject = msg.get(
+                    "subject",
+                    "No Subject"
+                )
 
                 full_msg = read_message(
                     token,
@@ -193,15 +238,24 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "❌ Failed to fetch inbox"
             )
 
-async def run_bot():
+# =========================
+# MAIN
+# =========================
+def main():
+
+    keep_alive()
+
     app = Application.builder().token(BOT_TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CallbackQueryHandler(button_handler))
+
+    app.add_handler(
+        CallbackQueryHandler(button_handler)
+    )
 
     print("Bot is running...")
 
-    await app.run_polling()
+    app.run_polling()
 
 if __name__ == "__main__":
-    asyncio.run(run_bot())
+    main()
