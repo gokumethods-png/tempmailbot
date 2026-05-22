@@ -2,6 +2,7 @@ import os
 import random
 import string
 import asyncio
+import requests
 
 from flask import Flask
 from threading import Thread
@@ -19,47 +20,35 @@ from telegram.ext import (
     ContextTypes
 )
 
-# ==========================
-# CONFIG
-# ==========================
-
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-
-# ==========================
-# KEEP RENDER ALIVE
-# ==========================
 
 web = Flask(__name__)
 
 @web.route("/")
 def home():
-    return "Generator.Email Bot Online"
+    return "TempMail Bot Online"
 
 def run_web():
     web.run(
         host="0.0.0.0",
-        port=int(
-            os.getenv(
-                "PORT",
-                "10000"
-            )
-        )
+        port=int(os.getenv("PORT", "10000"))
     )
 
 def keep_alive():
-
     Thread(
         target=run_web,
         daemon=True
     ).start()
 
-# ==========================
-# MAIL GENERATOR
-# ==========================
+users = {}
+
+# =====================
+# GENERATE MAIL
+# =====================
 
 def generate_email():
 
-    name = "".join(
+    username = "".join(
         random.choices(
             string.ascii_lowercase +
             string.digits,
@@ -67,11 +56,35 @@ def generate_email():
         )
     )
 
-    return f"{name}@generator.email"
+    return f"{username}@generator.email"
 
-# ==========================
+# =====================
+# FETCH EMAIL
+# =====================
+
+def get_mail(email):
+
+    try:
+
+        url = f"https://generator.email/{email}"
+
+        r = requests.get(
+            url,
+            timeout=10
+        )
+
+        if r.status_code == 200:
+
+            return "📬 Inbox checked.\nOpen generator.email to view messages."
+
+        return "📭 Inbox empty"
+
+    except:
+        return "❌ Failed to load inbox"
+
+# =====================
 # START
-# ==========================
+# =====================
 
 async def start(
     update: Update,
@@ -81,28 +94,28 @@ async def start(
     keyboard = [
         [
             InlineKeyboardButton(
-                "📧 Generate Mail",
+                "📧 Generate",
                 callback_data="gen"
             )
         ],
         [
             InlineKeyboardButton(
-                "📥 Inbox Link",
+                "📥 Check Inbox",
                 callback_data="inbox"
             )
         ]
     ]
 
     await update.message.reply_text(
-        "🔥 Generator.Email TempMail",
+        "🔥 TempMail Bot",
         reply_markup=InlineKeyboardMarkup(
             keyboard
         )
     )
 
-# ==========================
+# =====================
 # BUTTONS
-# ==========================
+# =====================
 
 async def buttons(
     update: Update,
@@ -113,45 +126,40 @@ async def buttons(
 
     await query.answer()
 
+    uid = query.from_user.id
+
     if query.data == "gen":
 
         email = generate_email()
 
-        context.user_data["mail"] = email
+        users[uid] = email
 
         await query.message.reply_text(
-            f"✅ Temp Mail Generated\n\n"
-            f"📧 `{email}`",
+            f"✅ Generated\n\n📧 `{email}`",
             parse_mode="Markdown"
         )
 
     elif query.data == "inbox":
 
-        email = context.user_data.get(
-            "mail"
-        )
-
-        if not email:
+        if uid not in users:
 
             await query.message.reply_text(
-                "❌ Generate mail first"
+                "Generate mail first"
             )
 
             return
 
-        inbox = (
-            "https://generator.email/"
-            + email
+        inbox = get_mail(
+            users[uid]
         )
 
         await query.message.reply_text(
-            f"📥 Inbox\n\n"
-            f"{inbox}"
+            inbox
         )
 
-# ==========================
+# =====================
 # MAIN
-# ==========================
+# =====================
 
 async def main():
 
@@ -160,9 +168,7 @@ async def main():
     app = (
         Application
         .builder()
-        .token(
-            BOT_TOKEN
-        )
+        .token(BOT_TOKEN)
         .build()
     )
 
@@ -184,10 +190,6 @@ async def main():
     await app.start()
 
     await app.updater.start_polling()
-
-    print(
-        "Bot started"
-    )
 
     while True:
 
