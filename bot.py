@@ -2,6 +2,7 @@ import os
 import random
 import string
 import asyncio
+
 from flask import Flask
 from threading import Thread
 
@@ -18,31 +19,46 @@ from telegram.ext import (
     ContextTypes
 )
 
+# ==========================
+# CONFIG
+# ==========================
+
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 
-# Web server for Render
+# ==========================
+# KEEP RENDER ALIVE
+# ==========================
+
 web = Flask(__name__)
 
 @web.route("/")
 def home():
-    return "Bot Online"
+    return "Generator.Email Bot Online"
 
 def run_web():
     web.run(
         host="0.0.0.0",
-        port=int(os.getenv("PORT", "10000"))
+        port=int(
+            os.getenv(
+                "PORT",
+                "10000"
+            )
+        )
     )
 
 def keep_alive():
+
     Thread(
         target=run_web,
         daemon=True
     ).start()
 
-# Store generated emails
-users = {}
+# ==========================
+# MAIL GENERATOR
+# ==========================
 
 def generate_email():
+
     name = "".join(
         random.choices(
             string.ascii_lowercase +
@@ -52,6 +68,10 @@ def generate_email():
     )
 
     return f"{name}@generator.email"
+
+# ==========================
+# START
+# ==========================
 
 async def start(
     update: Update,
@@ -80,6 +100,10 @@ async def start(
         )
     )
 
+# ==========================
+# BUTTONS
+# ==========================
+
 async def buttons(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE
@@ -89,32 +113,45 @@ async def buttons(
 
     await query.answer()
 
-    uid = query.from_user.id
-
     if query.data == "gen":
 
         email = generate_email()
 
-        users[uid] = email
+        context.user_data["mail"] = email
 
         await query.message.reply_text(
+            f"✅ Temp Mail Generated\n\n"
             f"📧 `{email}`",
             parse_mode="Markdown"
         )
 
     elif query.data == "inbox":
 
-        if uid not in users:
+        email = context.user_data.get(
+            "mail"
+        )
+
+        if not email:
 
             await query.message.reply_text(
-                "Generate mail first"
+                "❌ Generate mail first"
             )
 
             return
 
-        await query.message.reply_text(
-            f"https://generator.email/{users[uid]}"
+        inbox = (
+            "https://generator.email/"
+            + email
         )
+
+        await query.message.reply_text(
+            f"📥 Inbox\n\n"
+            f"{inbox}"
+        )
+
+# ==========================
+# MAIN
+# ==========================
 
 async def main():
 
@@ -123,7 +160,9 @@ async def main():
     app = (
         Application
         .builder()
-        .token(BOT_TOKEN)
+        .token(
+            BOT_TOKEN
+        )
         .build()
     )
 
@@ -146,10 +185,18 @@ async def main():
 
     await app.updater.start_polling()
 
+    print(
+        "Bot started"
+    )
+
     while True:
+
         await asyncio.sleep(
             3600
         )
 
 if __name__ == "__main__":
-    asyncio.run(main())
+
+    asyncio.run(
+        main()
+    )
