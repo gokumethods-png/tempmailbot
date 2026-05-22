@@ -22,18 +22,23 @@ from telegram.ext import (
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 
-MAIL_API = "https://api.mail.tm"
+API = "https://api.mail.tm"
 
 web = Flask(__name__)
 
 @web.route("/")
 def home():
-    return "Bot Online"
+    return "Bot Running"
 
 def run_web():
     web.run(
         host="0.0.0.0",
-        port=int(os.getenv("PORT", "10000"))
+        port=int(
+            os.getenv(
+                "PORT",
+                "10000"
+            )
+        )
     )
 
 def keep_alive():
@@ -55,33 +60,38 @@ def rand(n=10):
 
 def create_mail():
 
-    domains = requests.get(
-        f"{MAIL_API}/domains"
-    ).json()["hydra:member"]
-
-    domain = domains[0]["domain"]
+    domain = "airsworld.net"
 
     email = f"{rand()}@{domain}"
 
     password = rand(12)
 
-    requests.post(
-        f"{MAIL_API}/accounts",
+    account = requests.post(
+        f"{API}/accounts",
         json={
             "address": email,
             "password": password
         }
     )
 
+    if account.status_code >= 400:
+        return None, None
+
     token = requests.post(
-        f"{MAIL_API}/token",
+        f"{API}/token",
         json={
             "address": email,
             "password": password
         }
-    ).json()["token"]
+    )
 
-    return email, token
+    if token.status_code >= 400:
+        return None, None
+
+    return (
+        email,
+        token.json()["token"]
+    )
 
 def get_inbox(token):
 
@@ -90,14 +100,20 @@ def get_inbox(token):
         f"Bearer {token}"
     }
 
-    msgs = requests.get(
-        f"{MAIL_API}/messages",
+    res = requests.get(
+        f"{API}/messages",
         headers=headers
-    ).json()["hydra:member"]
+    )
 
-    return msgs
+    return res.json().get(
+        "hydra:member",
+        []
+    )
 
-async def start(update, context):
+async def start(
+    update,
+    context
+):
 
     keyboard = [
         [
@@ -115,14 +131,17 @@ async def start(update, context):
     ]
 
     await update.message.reply_text(
-        "🔥 TempMail Bot",
+        "🔥 AirsWorld TempMail",
         reply_markup=
         InlineKeyboardMarkup(
             keyboard
         )
     )
 
-async def buttons(update, context):
+async def buttons(
+    update,
+    context
+):
 
     q = update.callback_query
 
@@ -134,8 +153,16 @@ async def buttons(update, context):
 
         email, token = create_mail()
 
+        if not email:
+
+            await q.message.reply_text(
+                "❌ airsworld.net unsupported"
+            )
+
+            return
+
         users[uid] = {
-            "mail": email,
+            "email": email,
             "token": token
         }
 
@@ -149,30 +176,30 @@ async def buttons(update, context):
         if uid not in users:
 
             await q.message.reply_text(
-                "Generate mail first"
+                "Generate first"
             )
 
             return
 
-        inbox = get_inbox(
+        msgs = get_inbox(
             users[uid]["token"]
         )
 
-        if not inbox:
+        if not msgs:
 
             await q.message.reply_text(
-                "📭 Inbox empty"
+                "📭 Inbox Empty"
             )
 
             return
 
         text = ""
 
-        for msg in inbox:
+        for m in msgs:
 
             text += (
-                f"📨 {msg['subject']}\n"
-                f"👤 {msg['from']['address']}\n\n"
+                f"📨 {m['subject']}\n"
+                f"👤 {m['from']['address']}\n\n"
             )
 
         await q.message.reply_text(
@@ -186,7 +213,9 @@ async def main():
     app = (
         Application
         .builder()
-        .token(BOT_TOKEN)
+        .token(
+            BOT_TOKEN
+        )
         .build()
     )
 
