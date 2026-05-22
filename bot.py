@@ -22,11 +22,13 @@ from telegram.ext import (
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 
+MAIL_API = "https://api.mail.tm"
+
 web = Flask(__name__)
 
 @web.route("/")
 def home():
-    return "TempMail Bot Online"
+    return "Bot Online"
 
 def run_web():
     web.run(
@@ -42,54 +44,60 @@ def keep_alive():
 
 users = {}
 
-# =====================
-# GENERATE MAIL
-# =====================
-
-def generate_email():
-
-    username = "".join(
+def rand(n=10):
+    return "".join(
         random.choices(
             string.ascii_lowercase +
             string.digits,
-            k=10
+            k=n
         )
     )
 
-    return f"{username}@generator.email"
+def create_mail():
 
-# =====================
-# FETCH EMAIL
-# =====================
+    domains = requests.get(
+        f"{MAIL_API}/domains"
+    ).json()["hydra:member"]
 
-def get_mail(email):
+    domain = domains[0]["domain"]
 
-    try:
+    email = f"{rand()}@{domain}"
 
-        url = f"https://generator.email/{email}"
+    password = rand(12)
 
-        r = requests.get(
-            url,
-            timeout=10
-        )
+    requests.post(
+        f"{MAIL_API}/accounts",
+        json={
+            "address": email,
+            "password": password
+        }
+    )
 
-        if r.status_code == 200:
+    token = requests.post(
+        f"{MAIL_API}/token",
+        json={
+            "address": email,
+            "password": password
+        }
+    ).json()["token"]
 
-            return "📬 Inbox checked.\nOpen generator.email to view messages."
+    return email, token
 
-        return "📭 Inbox empty"
+def get_inbox(token):
 
-    except:
-        return "❌ Failed to load inbox"
+    headers = {
+        "Authorization":
+        f"Bearer {token}"
+    }
 
-# =====================
-# START
-# =====================
+    msgs = requests.get(
+        f"{MAIL_API}/messages",
+        headers=headers
+    ).json()["hydra:member"]
 
-async def start(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE
-):
+    return msgs
+
+async def start(update, context):
 
     keyboard = [
         [
@@ -100,7 +108,7 @@ async def start(
         ],
         [
             InlineKeyboardButton(
-                "📥 Check Inbox",
+                "📥 Inbox",
                 callback_data="inbox"
             )
         ]
@@ -108,58 +116,68 @@ async def start(
 
     await update.message.reply_text(
         "🔥 TempMail Bot",
-        reply_markup=InlineKeyboardMarkup(
+        reply_markup=
+        InlineKeyboardMarkup(
             keyboard
         )
     )
 
-# =====================
-# BUTTONS
-# =====================
+async def buttons(update, context):
 
-async def buttons(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE
-):
+    q = update.callback_query
 
-    query = update.callback_query
+    await q.answer()
 
-    await query.answer()
+    uid = q.from_user.id
 
-    uid = query.from_user.id
+    if q.data == "gen":
 
-    if query.data == "gen":
+        email, token = create_mail()
 
-        email = generate_email()
+        users[uid] = {
+            "mail": email,
+            "token": token
+        }
 
-        users[uid] = email
-
-        await query.message.reply_text(
-            f"✅ Generated\n\n📧 `{email}`",
+        await q.message.reply_text(
+            f"📧 `{email}`",
             parse_mode="Markdown"
         )
 
-    elif query.data == "inbox":
+    elif q.data == "inbox":
 
         if uid not in users:
 
-            await query.message.reply_text(
+            await q.message.reply_text(
                 "Generate mail first"
             )
 
             return
 
-        inbox = get_mail(
-            users[uid]
+        inbox = get_inbox(
+            users[uid]["token"]
         )
 
-        await query.message.reply_text(
-            inbox
-        )
+        if not inbox:
 
-# =====================
-# MAIN
-# =====================
+            await q.message.reply_text(
+                "📭 Inbox empty"
+            )
+
+            return
+
+        text = ""
+
+        for msg in inbox:
+
+            text += (
+                f"📨 {msg['subject']}\n"
+                f"👤 {msg['from']['address']}\n\n"
+            )
+
+        await q.message.reply_text(
+            text[:3500]
+        )
 
 async def main():
 
@@ -192,13 +210,8 @@ async def main():
     await app.updater.start_polling()
 
     while True:
-
         await asyncio.sleep(
             3600
         )
 
-if __name__ == "__main__":
-
-    asyncio.run(
-        main()
-    )
+asyncio.run(main())
