@@ -21,12 +21,13 @@ from telegram.ext import (
 )
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-
 API = "https://api.mail.tm"
 
-# =====================
-# WEB
-# =====================
+users = {}
+
+# -----------------
+# WEB SERVER
+# -----------------
 
 web = Flask(__name__)
 
@@ -53,15 +54,9 @@ def keep_alive():
         daemon=True
     ).start()
 
-# =====================
-# STORE USERS
-# =====================
-
-users = {}
-
-# =====================
+# -----------------
 # RANDOM
-# =====================
+# -----------------
 
 def rand(n=10):
 
@@ -79,109 +74,154 @@ def rand(n=10):
 
     )
 
-# =====================
-# CREATE MAIL
-# =====================
+# -----------------
+# CREATE EMAIL
+# -----------------
 
 def create_mail():
 
-    domains = requests.get(
+    try:
 
-        f"{API}/domains"
+        res = requests.get(
+            f"{API}/domains",
+            timeout=15
+        )
 
-    ).json()["hydra:member"]
+        domains = res.json()
 
-    allowed = []
+        domains = domains[
+            "hydra:member"
+        ]
 
-    for d in domains:
+        available = []
 
-        domain = d["domain"]
+        for d in domains:
 
-        if domain != "wshu.net":
+            name = d["domain"]
 
-            allowed.append(
-                domain
-            )
+            if name != "wshu.net":
 
-    domain = random.choice(
-        allowed
-    )
+                available.append(
+                    name
+                )
 
-    email = f"{rand()}@{domain}"
+        if not available:
 
-    password = rand(12)
+            return None
 
-    requests.post(
+        domain = random.choice(
+            available
+        )
 
-        f"{API}/accounts",
+        email = (
 
-        json={
+            f"{rand()}@{domain}"
 
-            "address": email,
+        )
 
-            "password": password
+        password = rand(12)
 
-        }
+        acc = requests.post(
 
-    )
+            f"{API}/accounts",
 
-    token = requests.post(
+            json={
 
-        f"{API}/token",
+                "address": email,
 
-        json={
+                "password": password
 
-            "address": email,
+            },
 
-            "password": password
+            timeout=15
 
-        }
+        )
 
-    )
+        if acc.status_code not in [
 
-    token = token.json()["token"]
+            200,
 
-    return (
+            201
 
-        email,
+        ]:
 
-        token
+            return None
 
-    )
+        token = requests.post(
 
-# =====================
+            f"{API}/token",
+
+            json={
+
+                "address": email,
+
+                "password": password
+
+            },
+
+            timeout=15
+
+        )
+
+        if token.status_code != 200:
+
+            return None
+
+        return (
+
+            email,
+
+            token.json()["token"]
+
+        )
+
+    except Exception as e:
+
+        print(e)
+
+        return None
+
+# -----------------
 # INBOX
-# =====================
+# -----------------
 
-def get_inbox(token):
+def inbox(token):
 
-    headers = {
+    try:
 
-        "Authorization":
+        headers = {
 
-        f"Bearer {token}"
+            "Authorization":
 
-    }
+            f"Bearer {token}"
 
-    res = requests.get(
+        }
 
-        f"{API}/messages",
+        r = requests.get(
 
-        headers=headers
+            f"{API}/messages",
 
-    )
+            headers=headers,
 
-    return res.json().get(
+            timeout=15
 
-        "hydra:member",
+        )
 
-        []
+        return r.json().get(
 
-    )
+            "hydra:member",
 
-# =====================
+            []
+
+        )
+
+    except:
+
+        return []
+
+# -----------------
 # START
-# =====================
+# -----------------
 
 async def start(
 
@@ -211,7 +251,7 @@ async def start(
 
                 "📥 Inbox",
 
-                callback_data="inbox"
+                callback_data="box"
 
             )
 
@@ -233,9 +273,9 @@ async def start(
 
     )
 
-# =====================
+# -----------------
 # BUTTONS
-# =====================
+# -----------------
 
 async def buttons(
 
@@ -251,11 +291,21 @@ async def buttons(
 
     uid = q.from_user.id
 
-    # Generate
-
     if q.data == "gen":
 
-        email, token = create_mail()
+        result = create_mail()
+
+        if not result:
+
+            await q.message.reply_text(
+
+                "❌ Generation failed"
+
+            )
+
+            return
+
+        email, token = result
 
         users[uid] = {
 
@@ -267,17 +317,13 @@ async def buttons(
 
         await q.message.reply_text(
 
-            f"✅ Generated\n\n"
-
-            f"📧 `{email}`",
+            f"✅ Generated\n\n📧 `{email}`",
 
             parse_mode="Markdown"
 
         )
 
-    # Inbox
-
-    elif q.data == "inbox":
+    elif q.data == "box":
 
         if uid not in users:
 
@@ -289,13 +335,13 @@ async def buttons(
 
             return
 
-        inbox = get_inbox(
+        msgs = inbox(
 
             users[uid]["token"]
 
         )
 
-        if not inbox:
+        if not msgs:
 
             await q.message.reply_text(
 
@@ -305,49 +351,27 @@ async def buttons(
 
             return
 
-        text = ""
+        out = ""
 
-        for mail in inbox:
+        for m in msgs:
 
-            subject = mail.get(
+            out += (
 
-                "subject",
+                f"📨 {m.get('subject','No Subject')}\n"
 
-                "No Subject"
-
-            )
-
-            sender = mail.get(
-
-                "from",
-
-                {}
-
-            ).get(
-
-                "address",
-
-                "Unknown"
-
-            )
-
-            text += (
-
-                f"📨 {subject}\n"
-
-                f"👤 {sender}\n\n"
+                f"👤 {m['from']['address']}\n\n"
 
             )
 
         await q.message.reply_text(
 
-            text[:3500]
+            out[:3500]
 
         )
 
-# =====================
+# -----------------
 # MAIN
-# =====================
+# -----------------
 
 async def main():
 
@@ -400,15 +424,11 @@ async def main():
     while True:
 
         await asyncio.sleep(
-
             3600
-
         )
 
 if __name__ == "__main__":
 
     asyncio.run(
-
         main()
-
     )
