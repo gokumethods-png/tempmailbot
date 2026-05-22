@@ -1,7 +1,7 @@
 import os
+import asyncio
 import random
 import string
-import asyncio
 import requests
 
 from flask import Flask
@@ -17,27 +17,25 @@ from telegram.ext import (
     Application,
     CommandHandler,
     CallbackQueryHandler,
-    ContextTypes
 )
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
+
 API = "https://api.mail.tm"
 
 users = {}
 
-# -----------------
-# WEB SERVER
-# -----------------
+# ----------------
 
-web = Flask(__name__)
+app_web = Flask(__name__)
 
-@web.route("/")
+@app_web.route("/")
 def home():
-    return "TempMail Running"
+    return "Online"
 
-def run_web():
+def web():
 
-    web.run(
+    app_web.run(
         host="0.0.0.0",
         port=int(
             os.getenv(
@@ -47,71 +45,52 @@ def run_web():
         )
     )
 
-def keep_alive():
+def keep():
 
     Thread(
-        target=run_web,
+        target=web,
         daemon=True
     ).start()
 
-# -----------------
-# RANDOM
-# -----------------
+# ----------------
 
-def rand(n=10):
+def rand(n=8):
 
     return "".join(
 
-        random.choices(
+        random.choice(
 
             string.ascii_lowercase +
 
-            string.digits,
-
-            k=n
+            string.digits
 
         )
+
+        for _ in range(n)
 
     )
 
-# -----------------
-# CREATE EMAIL
-# -----------------
+# ----------------
 
-def create_mail():
+def generate():
 
     try:
 
-        res = requests.get(
-            f"{API}/domains",
-            timeout=15
-        )
+        domains = requests.get(
 
-        domains = res.json()
+            f"{API}/domains"
 
-        domains = domains[
+        ).json()
+
+        domain = domains[
+
             "hydra:member"
+
+        ][0][
+
+            "domain"
+
         ]
-
-        available = []
-
-        for d in domains:
-
-            name = d["domain"]
-
-            if name != "wshu.net":
-
-                available.append(
-                    name
-                )
-
-        if not available:
-
-            return None
-
-        domain = random.choice(
-            available
-        )
 
         email = (
 
@@ -119,9 +98,9 @@ def create_mail():
 
         )
 
-        password = rand(12)
+        password = rand(10)
 
-        acc = requests.post(
+        requests.post(
 
             f"{API}/accounts",
 
@@ -131,21 +110,9 @@ def create_mail():
 
                 "password": password
 
-            },
-
-            timeout=15
+            }
 
         )
-
-        if acc.status_code not in [
-
-            200,
-
-            201
-
-        ]:
-
-            return None
 
         token = requests.post(
 
@@ -157,13 +124,11 @@ def create_mail():
 
                 "password": password
 
-            },
+            }
 
-            timeout=15
+        ).json()
 
-        )
-
-        if token.status_code != 200:
+        if "token" not in token:
 
             return None
 
@@ -171,57 +136,45 @@ def create_mail():
 
             email,
 
-            token.json()["token"]
-
-        )
-
-    except Exception as e:
-
-        print(e)
-
-        return None
-
-# -----------------
-# INBOX
-# -----------------
-
-def inbox(token):
-
-    try:
-
-        headers = {
-
-            "Authorization":
-
-            f"Bearer {token}"
-
-        }
-
-        r = requests.get(
-
-            f"{API}/messages",
-
-            headers=headers,
-
-            timeout=15
-
-        )
-
-        return r.json().get(
-
-            "hydra:member",
-
-            []
+            token["token"]
 
         )
 
     except:
 
+        return None
+
+# ----------------
+
+def inbox(token):
+
+    try:
+
+        r = requests.get(
+
+            f"{API}/messages",
+
+            headers={
+
+                "Authorization":
+
+                f"Bearer {token}"
+
+            }
+
+        )
+
+        return r.json()[
+
+            "hydra:member"
+
+        ]
+
+    except:
+
         return []
 
-# -----------------
-# START
-# -----------------
+# ----------------
 
 async def start(
 
@@ -231,7 +184,7 @@ async def start(
 
 ):
 
-    keyboard = [
+    kb = [
 
         [
 
@@ -239,7 +192,7 @@ async def start(
 
                 "📧 Generate",
 
-                callback_data="gen"
+                callback_data="g"
 
             )
 
@@ -251,7 +204,7 @@ async def start(
 
                 "📥 Inbox",
 
-                callback_data="box"
+                callback_data="i"
 
             )
 
@@ -267,17 +220,15 @@ async def start(
 
         InlineKeyboardMarkup(
 
-            keyboard
+            kb
 
         )
 
     )
 
-# -----------------
-# BUTTONS
-# -----------------
+# ----------------
 
-async def buttons(
+async def click(
 
     update,
 
@@ -291,39 +242,39 @@ async def buttons(
 
     uid = q.from_user.id
 
-    if q.data == "gen":
+    if q.data == "g":
 
-        result = create_mail()
+        res = generate()
 
-        if not result:
+        if not res:
 
             await q.message.reply_text(
 
-                "❌ Generation failed"
+                "❌ Failed"
 
             )
 
             return
 
-        email, token = result
+        email, token = res
 
-        users[uid] = {
+        users[uid] = (
 
-            "email": email,
+            email,
 
-            "token": token
+            token
 
-        }
+        )
 
         await q.message.reply_text(
 
-            f"✅ Generated\n\n📧 `{email}`",
+            f"📧 `{email}`",
 
             parse_mode="Markdown"
 
         )
 
-    elif q.data == "box":
+    else:
 
         if uid not in users:
 
@@ -335,49 +286,47 @@ async def buttons(
 
             return
 
-        msgs = inbox(
+        mail = inbox(
 
-            users[uid]["token"]
+            users[uid][1]
 
         )
 
-        if not msgs:
+        if not mail:
 
             await q.message.reply_text(
 
-                "📭 Inbox Empty"
+                "📭 Empty"
 
             )
 
             return
 
-        out = ""
+        text = ""
 
-        for m in msgs:
+        for m in mail:
 
-            out += (
+            text += (
 
-                f"📨 {m.get('subject','No Subject')}\n"
+                f"📨 "
 
-                f"👤 {m['from']['address']}\n\n"
+                f"{m['subject']}\n"
 
             )
 
         await q.message.reply_text(
 
-            out[:3500]
+            text
 
         )
 
-# -----------------
-# MAIN
-# -----------------
+# ----------------
 
 async def main():
 
-    keep_alive()
+    keep()
 
-    app = (
+    bot = (
 
         Application
 
@@ -393,7 +342,7 @@ async def main():
 
     )
 
-    app.add_handler(
+    bot.add_handler(
 
         CommandHandler(
 
@@ -405,30 +354,30 @@ async def main():
 
     )
 
-    app.add_handler(
+    bot.add_handler(
 
         CallbackQueryHandler(
 
-            buttons
+            click
 
         )
 
     )
 
-    await app.initialize()
+    await bot.initialize()
 
-    await app.start()
+    await bot.start()
 
-    await app.updater.start_polling()
+    await bot.updater.start_polling()
 
     while True:
 
         await asyncio.sleep(
-            3600
+
+            999999
+
         )
 
-if __name__ == "__main__":
-
-    asyncio.run(
-        main()
-    )
+asyncio.run(
+    main()
+)
